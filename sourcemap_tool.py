@@ -1,5 +1,5 @@
 import argparse
-from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemaps
+from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemaps, cascade_sourcemaps
 from os.path import join, dirname, normpath, isabs
 from sys import exit, stderr
 
@@ -53,6 +53,7 @@ def lex(code_lines, lexername):
         print('For lexer support please install extras: pip install sourcemap-tool[lexer]', file=stderr)
         exit(1)
 
+    # TODO: join lexemes with trailing space, remove comment lexemes
     lexer = get_lexer_by_name(lexername)
     tokens = lex(''.join(code_lines), lexer)
     result = []
@@ -113,7 +114,10 @@ def concat(args):
 
 
 def cascade(args):
-    print('CASCADE', args)
+    mapunder = create_from_json(args.mapunder.read())
+    mapover = create_from_json(args.mapover.read())
+    resultmap = cascade_sourcemaps(mapunder, mapover)
+    args.outmap.write(resultmap.dump())
 
 
 def non_negative_int(line):
@@ -139,32 +143,37 @@ class FileConcatList(argparse.Action):
         setattr(namespace, 'file', lst)
 
 
-parser = argparse.ArgumentParser(description='Swiss knife for sourcemaps')
-subparsers = parser.add_subparsers(dest='tool', title='available tools')
-subparsers.required=True
+def create_parser():
+    parser = argparse.ArgumentParser(description='Swiss knife for sourcemaps')
+    subparsers = parser.add_subparsers(dest='tool', title='available tools')
+    subparsers.required=True
 
-parser_lookup = subparsers.add_parser('lookup', help='Perform sourcemap lookup', description='For given position in compiled file find position in source')
-parser_lookup.add_argument('file', type=argparse.FileType('r'), help='Compiled file used for lookup')
-parser_lookup.add_argument('line', type=non_negative_int, help='Line number (counting from zero)')
-parser_lookup.add_argument('column', type=non_negative_int, help='Column number, character position in line (counting from zero)')
-# TODO: rename to map
-parser_lookup.add_argument('--mapfile', type=argparse.FileType('r'), help='Directly assign sourcemap file')
-parser_lookup.add_argument('--showcode', action='store_true', help='Output vicinal code from source file')
-parser_lookup.set_defaults(func=lookup)
+    parser_lookup = subparsers.add_parser('lookup', help='Perform sourcemap lookup', description='For given position in compiled file find position in source')
+    parser_lookup.add_argument('file', type=argparse.FileType('r'), help='Compiled file used for lookup')
+    parser_lookup.add_argument('line', type=non_negative_int, help='Line number (counting from zero)')
+    parser_lookup.add_argument('column', type=non_negative_int, help='Column number, character position in line (counting from zero)')
+    # TODO: rename to map
+    parser_lookup.add_argument('--mapfile', type=argparse.FileType('r'), help='Directly assign sourcemap file')
+    parser_lookup.add_argument('--showcode', action='store_true', help='Output vicinal code from source file')
+    parser_lookup.set_defaults(func=lookup)
 
-parser_concat = subparsers.add_parser('concat', help='Concatenate sourcemaps and scripts')
-group = parser_concat.add_argument_group('files for concatenation', 'Use multiple series of these arguments starting with --file')
-group.add_argument('--file', type=argparse.FileType('r'), action=FileConcatList, required=True, help='Files for concatenation. Can have or have no sourcemap, can even be any raw code')
-group.add_argument('--map', type=argparse.FileType('r'), action=FileConcatList, help='Directly assign sourcemap')
-group.add_argument('--lexer', action=FileConcatList, help='Use certain pygments lexer for file without sourcemap')
-group = parser_concat.add_argument_group('output')
-group.add_argument('--outfile', type=argparse.FileType('w'), required=True, help='Output path for concatenated code')
-group.add_argument('--outmap', type=argparse.FileType('w'), required=True, help='Output path for concatenated sourcemap')
-parser_concat.set_defaults(func=concat)
+    parser_concat = subparsers.add_parser('concat', help='Concatenate sourcemaps and scripts')
+    group = parser_concat.add_argument_group('files for concatenation', 'Use multiple series of these arguments starting with --file')
+    group.add_argument('--file', type=argparse.FileType('r'), action=FileConcatList, required=True, help='Files for concatenation. Can have or have no sourcemap, can even be any raw code')
+    group.add_argument('--map', type=argparse.FileType('r'), action=FileConcatList, help='Directly assign sourcemap')
+    group.add_argument('--lexer', action=FileConcatList, help='Use certain pygments lexer for file without sourcemap')
+    group = parser_concat.add_argument_group('output')
+    group.add_argument('--outfile', type=argparse.FileType('w'), required=True, help='Output path for concatenated code')
+    group.add_argument('--outmap', type=argparse.FileType('w'), required=True, help='Output path for concatenated sourcemap')
+    parser_concat.set_defaults(func=concat)
 
-parser_cascade = subparsers.add_parser('cascade', help='Merge multiple stage sourcemaps')
-parser_cascade.set_defaults(func=cascade)
+    parser_cascade = subparsers.add_parser('cascade', help='Merge multiple stage sourcemaps')
+    parser_cascade.add_argument('mapunder', type=argparse.FileType('r'), help='Underlying map (previous step)')
+    parser_cascade.add_argument('mapover', type=argparse.FileType('r'), help='Overlying map (next step applied on top of result of previous)')
+    parser_cascade.add_argument('outmap', type=argparse.FileType('w'), help='Output path for resulting combined sourcemap')
+    parser_cascade.set_defaults(func=cascade)
+    return parser
 
 if __name__ == '__main__':
-    args = parser.parse_args()
+    args = create_parser().parse_args()
     args.func(args)

@@ -95,6 +95,7 @@ class SourceMap:
     def dump(self, serialize=True):
         # TODO: cleanup unused references
         # TODO: cleanup zero-len segments
+        # TODO: merge same target segments
         mappings = []
         prevsource, prevsourceline, prevsourcecolumn, prevname = 0, 0, 0, 0
         for line in self.lines:
@@ -115,8 +116,8 @@ class SourceMap:
             mappings.append(','.join(resultline))
         mapdata = {
             'version': 3,
-            'file': self.file,
-            'sourceRoot': self.sourceRoot,
+            'file': '' if self.file is None else self.file,
+            'sourceRoot': '' if self.sourceRoot is None else self.sourceRoot,
             'sources': self.sources.copy(),
             'names': self.names.copy(),
             'mappings': ';'.join(mappings),
@@ -195,13 +196,18 @@ def cascade_sourcemaps(mapunder, mapover):
             if len(seg) == 2:
                 resultline.append(seg)
             else:
-                lk = mapunder.lookup(seg[2], seg[3], useSourceRoot=False)
-                resultline.append((
-                    seg[0], # starting column
-                    sourceindex[lk['source']], # source file
-                    lk['line'], # line in source
-                    lk['column'], # column in source
-                ))
+                try:
+                    lk = mapunder.lookup(seg[2], seg[3], useSourceRoot=False)
+                    resultline.append((
+                        seg[0], # starting column
+                        sourceindex[lk['source']], # source file
+                        lk['line'], # line in source
+                        lk['column'], # column in source
+                    ))
+                except SegmentNotFoundException:
+                    resultline.append(( seg[0], ))
+                except IndexError:
+                    resultline.append(( seg[0], ))
         result.lines.append(resultline)
     return result
 
