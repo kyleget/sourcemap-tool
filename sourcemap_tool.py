@@ -1,5 +1,5 @@
 import argparse
-from sourcemap_tool_lib import discover_sourcemap, create_from_json, concat_sourcemaps
+from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemaps
 from os.path import join, dirname, normpath, isabs
 from sys import exit
 
