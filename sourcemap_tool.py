@@ -1,7 +1,7 @@
 import argparse
 from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemaps
 from os.path import join, dirname, normpath, isabs
-from sys import exit
+from sys import exit, stderr
 
 # TODO: support different encodings and line endings
 
@@ -46,13 +46,34 @@ def lookup(args):
 
 
 def lex(code_lines, lexername):
-    from pygments.lexers import get_lexer_by_name
-    from pygments import lex
+    try:
+        from pygments.lexers import get_lexer_by_name
+        from pygments import lex
+    except ImportError:
+        print('For lexer support please install extras: pip install sourcemap-tool[lexer]', file=stderr)
+        exit(1)
 
     lexer = get_lexer_by_name(lexername)
-    tokens = lex(code_lines, lexer)
-    for tok in tokens:
-        print(tok)
+    tokens = lex(''.join(code_lines), lexer)
+    result = []
+    line = []
+    for _, text in tokens:
+        parts = text.split('\n')
+        if len(parts) > 1: # multiline token
+            first = True
+            for part in parts:
+                if not first:
+                    result.append(line)
+                    line = []
+                first = False
+                if len(part) > 0:
+                    line.append(len(part))
+        else:
+            if len(text) > 0:
+                line.append(len(text))
+    if line:
+        result.append(line)
+    return result
 
 
 def concat(args):
@@ -69,9 +90,7 @@ def concat(args):
         if 'map' in fconfig:
             mappath = fconfig['map']
         else:
-            if mapurl is None:
-                mappath = fconfig['file'].name
-            else:
+            if mapurl is not None:
                 mappath = filepath_relative_to_file(fconfig['file'].name, mapurl)
         lexer = fconfig.get('lexer', None)
         if mappath is not None:
@@ -83,7 +102,7 @@ def concat(args):
                 except IndexError:
                     pass
         elif lexer is not None:
-            smap = lex(code_lines, lexer)
+            smap = (fconfig['file'].name, lex(code_lines, lexer))
         else:
             smap = len(code_lines)
         result_code.extend(code_lines)
@@ -128,7 +147,7 @@ parser_lookup = subparsers.add_parser('lookup', help='Perform sourcemap lookup',
 parser_lookup.add_argument('file', type=argparse.FileType('r'), help='Compiled file used for lookup')
 parser_lookup.add_argument('line', type=non_negative_int, help='Line number (counting from zero)')
 parser_lookup.add_argument('column', type=non_negative_int, help='Column number, character position in line (counting from zero)')
-# TODO: rename
+# TODO: rename to map
 parser_lookup.add_argument('--mapfile', type=argparse.FileType('r'), help='Directly assign sourcemap file')
 parser_lookup.add_argument('--showcode', action='store_true', help='Output vicinal code from source file')
 parser_lookup.set_defaults(func=lookup)
@@ -146,5 +165,6 @@ parser_concat.set_defaults(func=concat)
 parser_cascade = subparsers.add_parser('cascade', help='Merge multiple stage sourcemaps')
 parser_cascade.set_defaults(func=cascade)
 
-args = parser.parse_args()
-args.func(args)
+if __name__ == '__main__':
+    args = parser.parse_args()
+    args.func(args)
