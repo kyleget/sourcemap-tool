@@ -46,7 +46,11 @@ def dump_vlq64(values):
     return ''.join(result)
 
 
-class SourceMapParsingException(Exception):
+class SourceMapParsingException(ValueError):
+    pass
+
+
+class SegmentNotFoundException(IndexError):
     pass
 
 
@@ -74,7 +78,7 @@ class SourceMap:
             else:
                 a = c + 1
         if seg is None:
-            raise IndexError('Segment not found')
+            raise SegmentNotFoundException
         if len(seg) == 1:
             return None
         result = {
@@ -89,6 +93,8 @@ class SourceMap:
         return result
 
     def dump(self, serialize=True):
+        # TODO: cleanup unused references
+        # TODO: cleanup zero-len segments
         mappings = []
         prevsource, prevsourceline, prevsourcecolumn, prevname = 0, 0, 0, 0
         for line in self.lines:
@@ -246,34 +252,25 @@ def concat_sourcemaps(*items):
     return result
 
 
-def print_near(fname, line, col):
-    with open(fname) as f:
-        lines = f.readlines()
-    width = 80
-    from_, to_ = col - width // 2, col + width // 2
-    if from_ < 0:
-        from_, to_ = 0, width
-    for i in range(max(0, line - 3), line + 3):
-        l = lines[i].rstrip('\n\r')
-        if i != line:
-            print(l[from_:to_])
-        else:
-            print('{}\x1B[7;91m{}\x1B[27;39m{}'.format(l[from_:col], l[col], l[col+1:to_]))
-
-
-if __name__ == '__main__':
-    with open('../webgl/build/camera.js.map') as f:
-        contents = f.read()
-    jdict = json.loads(contents)
-    smap = create_from_json(jdict)
-    p = (1, 11)
-    lk = smap.lookup(*p)
-    print(lk)
-    print_near('../webgl/build/camera.js', *p)
-    print('===========')
-    print_near('../webgl/camera.coffee', lk['line'], lk['column'])
-    jd2 = smap.dump(serialize=False)
-
-    print(jdict == jd2)
-    #print(jdict)
-    #print(jd2)
+def discover_sourcemap(file, return_line_number=False):
+    # TODO: split method to find_marker and parse_marker
+    if isinstance(file, list):
+        lines = file
+    else:
+        lines = file.readlines()
+    lnum = len(lines) - 5 - 1
+    for line in lines[-5:]:
+        lnum += 1
+        line = line.lstrip()
+        if not (line.startswith('//@') or line.startswith('//#') or line.startswith('/*#')):
+            continue
+        line = line[3:].lstrip()
+        if not line.startswith('sourceMappingURL='):
+            continue
+        _, url = line.split('=', 1)
+        url, _ = (url.strip() + ' ').split(' ', 1)
+        url = url.strip()
+        if return_line_number:
+            return (url, lnum)
+        return url
+    raise IndexError('Couldn\'t find sourceMappingURL in file')
