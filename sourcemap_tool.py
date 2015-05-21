@@ -1,9 +1,10 @@
 import argparse
-from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemaps, cascade_sourcemaps
-from os.path import join, dirname, normpath, isabs
+from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemaps, cascade_sourcemaps, safe_join
+from os.path import join, dirname, normpath, isabs, relpath, basename, abspath, split as path_split
 from sys import exit, stderr
 
 # TODO: support different encodings and line endings
+# TODO: check if only possible dir separator is /
 
 
 def print_near(fname, line, col):
@@ -77,6 +78,30 @@ def lex(code_lines, lexername):
     return result
 
 
+def absolute_sourceRoot(mappath, sourceRoot):
+    return safe_join(
+        abspath(dirname(mappath)),
+        sourceRoot
+    )
+
+
+def root_paths(paths):
+    similarity = None
+    for v in paths:
+        vsp = path_split(v)
+        if similarity is None:
+            similarity = vsp
+        else:
+            for i, (a, b) in enumerate(zip(vsp, similarity)):
+                if a != b:
+                    similarity = similarity[:i]
+                    break
+    simlen = len(similarity)
+    newpaths = [join(*( path_split(v)[simlen:] )) for v in paths]
+    newroot = join(*similarity)
+    return newroot, newpaths
+
+
 def concat(args):
     result_code = []
     smaplist = []
@@ -84,40 +109,80 @@ def concat(args):
         code_lines = fconfig['file'].readlines()
         try:
             mapurl, markerline = discover_sourcemap(code_lines, return_line_number=True)
-            code_lines.pop(markerline)
+            code_lines.pop(markerline) # remove sourcemap url marker from code
         except IndexError:
-            mapurl, markerline = None, None
+            mapurl, markerline = None, None # sourcemap not detected
+
         mappath = None
         if 'map' in fconfig:
-            mappath = fconfig['map']
+            mappath = fconfig['map']  # direct setting sourcemap path
         else:
             if mapurl is not None:
                 mappath = filepath_relative_to_file(fconfig['file'].name, mapurl)
-        lexer = fconfig.get('lexer', None)
+
         if mappath is not None:
+            # sourcemap file exists
             with open(mappath, 'r') as f:
                 smap = create_from_json(f.read())
-            if markerline:
+            if markerline is not None:
                 try:
-                    smap.lines.pop(markerline)
+                    smap.lines.pop(markerline)  # deleting same line from sourcemap too
                 except IndexError:
                     pass
-        elif lexer is not None:
-            smap = (fconfig['file'].name, lex(code_lines, lexer))
+            if len(smap.lines) > len(code_lines):
+                raise ValueError('Sourcemap for file {} contains more lines than original code'.format(fconfig['file'].name))
+            while len(smap.lines) < len(code_lines):
+                smap.lines.append([])
+
+            smap.sourceRoot = absolute_sourceRoot(mappath, smap.sourceRoot)
+
+        elif fconfig.get('lexer', None) is not None:
+            smap = ( abspath(fconfig['file'].name), lex(code_lines, fconfig['lexer']) )
         else:
             smap = len(code_lines)
         result_code.extend(code_lines)
         smaplist.append(smap)
     mergedmap = concat_sourcemaps(*smaplist)
+
+    mergedmap.sourceRoot, mergedmap.sources = root_paths([
+        relpath( source, start=abspath(dirname(args.outmap.name)) ) \
+        for source in mergedmap.sources
+    ])
+
     args.outmap.write(mergedmap.dump())
     args.outfile.writelines(result_code)
+    args.outfile.write('//# sourceMappingURL={}'.format(
+        relpath( args.outmap.name, start=dirname(args.outfile.name) )
+    ))
 
 
 def cascade(args):
     mapunder = create_from_json(args.mapunder.read())
     mapover = create_from_json(args.mapover.read())
+
+    mapunder.sourceRoot = absolute_sourceRoot(args.mapunder.name, mapunder.sourceRoot)
+    mapover.sourceRoot = absolute_sourceRoot(args.mapover.name, mapover.sourceRoot)
+    
     resultmap = cascade_sourcemaps(mapunder, mapover)
+    resultmap.sourceRoot, resultmap.sources = root_paths([
+        relpath( source, start=abspath(dirname(args.outmap.name)) ) \
+        for source in resultmap.sources
+    ])
     args.outmap.write(resultmap.dump())
+
+    if args.fixmapurl is not None:
+        rcode_lines = args.fixmapurl.readlines()
+        try:
+            _, markerline = discover_sourcemap(rcode_lines, return_line_number=True)
+            rcode_lines.pop(markerline)
+            args.fixmapurl.seek(0)  # rewrite file to remove old url
+            args.fixmapurl.truncate()
+            args.fixmapurl.writelines(rcode_lines)
+        except IndexError:
+            pass
+        args.fixmapurl.write('//# sourceMappingURL={}'.format(
+            relpath( args.outmap.name, start=dirname(args.fixmapurl.name) )
+        ))
 
 
 def non_negative_int(line):
@@ -171,6 +236,7 @@ def create_parser():
     parser_cascade.add_argument('mapunder', type=argparse.FileType('r'), help='Underlying map (previous step)')
     parser_cascade.add_argument('mapover', type=argparse.FileType('r'), help='Overlying map (next step applied on top of result of previous)')
     parser_cascade.add_argument('outmap', type=argparse.FileType('w'), help='Output path for resulting combined sourcemap')
+    parser_cascade.add_argument('--fixmapurl', type=argparse.FileType('r+'), help='Resulting code file for autofixing sourcemap url')
     parser_cascade.set_defaults(func=cascade)
     return parser
 

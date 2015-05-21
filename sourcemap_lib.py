@@ -1,5 +1,7 @@
 import json
-from os.path import join
+from os.path import join, normpath, isabs
+
+# TODO: use urldecode/urlencode for urls
 
 
 base64_line = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -54,6 +56,17 @@ class SegmentNotFoundException(IndexError):
     pass
 
 
+def url_to_path(u):
+    # TODO: support for absolute urls, cut off their schemes?
+    return join(*u.split('/'))
+
+
+def safe_join(a, b):
+    if isabs(b):
+        return b
+    return normpath(join(a, b))
+
+
 class SourceMap:
     def __init__(self):
         self.file = None
@@ -80,14 +93,15 @@ class SourceMap:
         if seg is None:
             raise SegmentNotFoundException
         if len(seg) == 1:
-            return None
+            #return None # segment without any link
+            raise SegmentNotFoundException
         result = {
             'source': self.sources[seg[1]],
             'line': seg[2],
             'column': seg[3],
         }
         if useSourceRoot:
-            result['source'] = join(self.sourceRoot, result['source'])
+            result['source'] = safe_join(self.sourceRoot, result['source'])
         if len(seg) > 4:
             result['name'] = seg[4]
         return result
@@ -138,11 +152,18 @@ def create_from_json(jsondata):
         v = jsondata.get(k, '')
         if not isinstance(v, str):
             raise SourceMapParsingException('Parameter {} must be string'.format(k))
+        if k == 'sourceRoot':
+            v = url_to_path(v)
         setattr(self, k, v)
     for k in ('sources', 'names'):
         v = jsondata.get(k, [])
         if not isinstance(v, list):
             raise SourceMapParsingException('Parameter {} must be array'.format(k))
+        for vv in v:
+            if not isinstance(vv, str):
+                raise SourceMapParsingException('Array element {} inside {} must be string'.format(vv, k))
+        if k == 'sources':
+            v = [url_to_path(vv) for vv in v]
         setattr(self, k, v)
     
     self.lines = []
@@ -179,14 +200,17 @@ def create_from_json(jsondata):
 
 
 def cascade_sourcemaps(mapunder, mapover):
+    '''
+    sourceRoot for each SourceMap instance required to be normalized absolute file path.
+    source for each SourceMap can be relative to sourceRoot or absolute file path.
+    '''
     result = SourceMap()
 
-    # TODO: merge paths!
-    #result.sourceRoot = mapunder.sourceRoot
     # TODO: names!
 
     result.file = mapover.file
-    result.sources = mapunder.sources.copy()
+    result.sourceRoot = ''
+    result.sources = [safe_join(mapunder.sourceRoot, v) for v in mapunder.sources]
 
     sourceindex = {v: i for i, v in enumerate(result.sources)}
 
@@ -197,7 +221,7 @@ def cascade_sourcemaps(mapunder, mapover):
                 resultline.append(seg)
             else:
                 try:
-                    lk = mapunder.lookup(seg[2], seg[3], useSourceRoot=False)
+                    lk = mapunder.lookup(seg[2], seg[3], useSourceRoot=True)
                     resultline.append((
                         seg[0], # starting column
                         sourceindex[lk['source']], # source file
@@ -217,6 +241,11 @@ def concat_sourcemaps(*items):
     - SourceMap instance
     - list of lines of lexeme lengths (identity map): (sourceFileName, [[lexemelen, lexemelen, ...], [lexemelen, lexemelen, ...], ...])
     - integer count of not mapped lines (for example, you can make wrappers or comments in resulting file)
+
+    sourceRoot for each SourceMap instance required to be normalized absolute file path.
+    source for each SourceMap can be relative to sourceRoot or absolute file path.
+
+    sourceFileName for each list of lines required to be normalized absolute file path.
     '''
     result = SourceMap()
     smap = {}
@@ -227,7 +256,7 @@ def concat_sourcemaps(*items):
         elif isinstance(item, SourceMap):
             local_smap = {}
             for i, source in enumerate(item.sources):
-                # TODO: join paths
+                source = safe_join(item.sourceRoot, source)
                 if source not in smap:
                     smap[source] = len(result.sources)
                     result.sources.append(source)
@@ -242,7 +271,6 @@ def concat_sourcemaps(*items):
                         rline.append((seg[0], local_smap[seg[1]], seg[2], seg[3]))
                 result.lines.append(rline)
         else:
-            # TODO: paths
             sname = item[0]
             if sname not in smap:
                 smap[sname] = len(result.sources)
@@ -259,7 +287,7 @@ def concat_sourcemaps(*items):
 
 
 def discover_sourcemap(file, return_line_number=False):
-    # TODO: split method to find_marker and parse_marker
+    # TODO: split method to find_marker, parse_marker, set_marker
     if isinstance(file, list):
         lines = file
     else:
