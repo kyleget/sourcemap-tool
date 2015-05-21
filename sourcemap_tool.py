@@ -28,6 +28,16 @@ def filepath_relative_to_file(basefile, relpath):
     return normpath(join(dirname(basefile), relpath))
 
 
+def full_path_split(path):
+    result = []
+    fn = None
+    while fn != '':
+        path, fn = path_split(path)
+        result.append(fn)
+    result.reverse()
+    return result
+
+
 def lookup(args):
     if args.mapfile:
         mapname = args.mapfile
@@ -88,7 +98,7 @@ def absolute_sourceRoot(mappath, sourceRoot):
 def root_paths(paths):
     similarity = None
     for v in paths:
-        vsp = path_split(v)
+        vsp = full_path_split(v)[:-1]  # exclude file name
         if similarity is None:
             similarity = vsp
         else:
@@ -97,7 +107,7 @@ def root_paths(paths):
                     similarity = similarity[:i]
                     break
     simlen = len(similarity)
-    newpaths = [join(*( path_split(v)[simlen:] )) for v in paths]
+    newpaths = [join(*( full_path_split(v)[simlen:] )) for v in paths]
     newroot = join(*similarity)
     return newroot, newpaths
 
