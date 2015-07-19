@@ -93,7 +93,7 @@ class SourceMap:
         if seg is None:
             raise SegmentNotFoundException
         if len(seg) == 1:
-            #return None # segment without any link
+            # return None # segment without any link
             raise SegmentNotFoundException
         result = {
             'source': self.sources[seg[1]],
@@ -165,7 +165,7 @@ def create_from_json(jsondata):
         if k == 'sources':
             v = [url_to_path(vv) for vv in v]
         setattr(self, k, v)
-    
+
     self.lines = []
     column, source, sourceline, sourcecolumn, name = 0, 0, 0, 0, 0
     for group in jsondata['mappings'].split(';'):
@@ -223,15 +223,15 @@ def cascade_sourcemaps(mapunder, mapover):
                 try:
                     lk = mapunder.lookup(seg[2], seg[3], useSourceRoot=True)
                     resultline.append((
-                        seg[0], # starting column
-                        sourceindex[lk['source']], # source file
-                        lk['line'], # line in source
-                        lk['column'], # column in source
+                        seg[0],  # starting column
+                        sourceindex[lk['source']],  # source file
+                        lk['line'],  # line in source
+                        lk['column'],  # column in source
                     ))
                 except SegmentNotFoundException:
-                    resultline.append(( seg[0], ))
+                    resultline.append((seg[0],))
                 except IndexError:
-                    resultline.append(( seg[0], ))
+                    resultline.append((seg[0],))
         result.lines.append(resultline)
     return result
 
