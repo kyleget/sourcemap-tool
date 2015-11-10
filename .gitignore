@@ -1,5 +1,6 @@
-*.pyc
-__pycache__
-.venv
-dist
-sourcemap_tool.egg-info
+*.py[cod]
+__pycache__/
+/dist/
+/build/
+/*.egg-info/
+/.pip/
