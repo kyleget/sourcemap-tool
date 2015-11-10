@@ -106,9 +106,12 @@ def root_paths(paths):
                 if a != b:
                     similarity = similarity[:i]
                     break
-    simlen = len(similarity)
-    newpaths = [join(*( full_path_split(v)[simlen:] )) for v in paths]
-    newroot = join(*similarity)
+    if similarity is None:
+        newroot, newpaths = '', paths
+    else:
+        simlen = len(similarity)
+        newpaths = [join(*( full_path_split(v)[simlen:] )) for v in paths]
+        newroot = join(*similarity)
     return newroot, newpaths
 
 
@@ -172,7 +175,7 @@ def cascade(args):
 
     mapunder.sourceRoot = absolute_sourceRoot(args.mapunder.name, mapunder.sourceRoot)
     mapover.sourceRoot = absolute_sourceRoot(args.mapover.name, mapover.sourceRoot)
-    
+
     resultmap = cascade_sourcemaps(mapunder, mapover)
     resultmap.sourceRoot, resultmap.sources = root_paths([
         relpath( source, start=abspath(dirname(args.outmap.name)) ) \
