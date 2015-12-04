@@ -3,9 +3,6 @@ from sourcemap_lib import discover_sourcemap, create_from_json, concat_sourcemap
 from os.path import join, dirname, normpath, isabs, relpath, basename, abspath, split as path_split
 from sys import exit, stderr
 
-# TODO: support different encodings and line endings
-# TODO: check if only possible dir separator is /
-
 
 def print_near(fname, line, col):
     with open(fname) as f:
